@@ -7,11 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"unsafe"
 
-	"github.com/yusufpapurcu/wmi"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 
 	"github.com/shirou/gopsutil/v4/internal/common"
 )
@@ -101,34 +100,54 @@ func Info() ([]InfoStat, error) {
 	return InfoWithContext(context.Background())
 }
 
+func extractCpuInfoFromRegistryKey(centralProcKey registry.Key, subkey string) (InfoStat, error) {
+	infoStat := InfoStat{}
+	subkeyKey, err := registry.OpenKey(centralProcKey, subkey, registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS|registry.READ)
+	if err != nil {
+		return infoStat, err
+	}
+	defer subkeyKey.Close()
+	vendorID, _, err := subkeyKey.GetStringValue("VendorIdentifier")
+	if err != nil {
+		return infoStat, err
+	}
+	infoStat.VendorID = vendorID
+	name, _, err := subkeyKey.GetStringValue("ProcessorNameString")
+	if err != nil {
+		return infoStat, err
+	}
+	infoStat.ModelName = name
+	family, _, err := subkeyKey.GetStringValue("Identifier")
+	if err != nil {
+		return infoStat, err
+	}
+	infoStat.Family = family
+	return infoStat, nil
+}
+
 func InfoWithContext(ctx context.Context) ([]InfoStat, error) {
+	centralProcKey, err := registry.OpenKey(registry.LOCAL_MACHINE, `HARDWARE\DESCRIPTION\System\CentralProcessor`, registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS|registry.READ)
+	if err != nil {
+		return nil, err
+	}
+	defer centralProcKey.Close()
+	subkeys, err := centralProcKey.ReadSubKeyNames(-1)
+	if err != nil {
+		return nil, err
+	}
 	var ret []InfoStat
-	var dst []win32_Processor
-	q := wmi.CreateQuery(&dst, "")
-	if err := common.WMIQueryWithContext(ctx, q, &dst); err != nil {
-		return ret, err
-	}
-
-	var procID string
-	for i, l := range dst {
-		procID = ""
-		if l.ProcessorID != nil {
-			procID = *l.ProcessorID
+	for _, subkey := range subkeys {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			infoStat, infoErr := extractCpuInfoFromRegistryKey(centralProcKey, subkey)
+			if infoErr != nil {
+				continue
+			}
+			ret = append(ret, infoStat)
 		}
-
-		cpu := InfoStat{
-			CPU:        int32(i),
-			Family:     strconv.FormatUint(uint64(l.Family), 10),
-			VendorID:   l.Manufacturer,
-			ModelName:  l.Name,
-			Cores:      int32(l.NumberOfLogicalProcessors),
-			PhysicalID: procID,
-			Mhz:        float64(l.MaxClockSpeed),
-			Flags:      []string{},
-		}
-		ret = append(ret, cpu)
 	}
-
 	return ret, nil
 }
 
