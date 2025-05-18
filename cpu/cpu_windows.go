@@ -20,17 +20,6 @@ var (
 	procGetLogicalProcessorInformationEx = common.Modkernel32.NewProc("GetLogicalProcessorInformationEx")
 )
 
-type win32_Processor struct { //nolint:revive //FIXME
-	Family                    uint16
-	Manufacturer              string
-	Name                      string
-	NumberOfLogicalProcessors uint32
-	NumberOfCores             uint32
-	ProcessorID               *string
-	Stepping                  *string
-	MaxClockSpeed             uint32
-}
-
 // SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION
 // defined in windows api doc with the following
 // https://docs.microsoft.com/en-us/windows/desktop/api/winternl/nf-winternl-ntquerysysteminformation#system_processor_performance_information
